@@ -37,8 +37,7 @@ describe("smoke: prompt injection + happy paths", () => {
       difficulty: "hard",
       exclude: [],
     });
-    const r = generateWithFallback({ prompt });
-    const obj = await r.object;
+    const obj = await generateWithFallback({ prompt });
     expect(obj.questions).toHaveLength(3);
     for (const q of obj.questions) {
       expect(q.length).toBeGreaterThan(20);
@@ -54,8 +53,7 @@ describe("smoke: prompt injection + happy paths", () => {
       difficulty: "medium",
       exclude,
     });
-    const r = generateWithFallback({ prompt });
-    const obj = await r.object;
+    const obj = await generateWithFallback({ prompt });
     expect(obj.questions).toHaveLength(3);
     for (const q of obj.questions) {
       expect(q.toLowerCase()).not.toContain("favorite project");
