@@ -21,8 +21,9 @@ export async function validate(input: string): Promise<ValidatorResult> {
       return { valid: false, reason: "malformed validator response" };
     }
     return parsed;
-  } catch {
-    return { valid: false, reason: "validator error" };
+  } catch (e) {
+    console.error("[validator]", (e as Error).message, (e as Error).stack?.slice(0, 500));
+    return { valid: false, reason: `validator error: ${(e as Error).message}` };
   }
 }
 
