@@ -1,5 +1,3 @@
-"use client";
-
 export function GenerateButton(props: {
   disabled: boolean;
   loading: boolean;

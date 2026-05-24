@@ -1,4 +1,3 @@
-"use client";
 import { StreamingText } from "./streaming-text";
 
 export function QuestionCard(props: {

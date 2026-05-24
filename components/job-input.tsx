@@ -1,5 +1,3 @@
-"use client";
-
 export function JobInput(props: {
   value: string;
   onChange: (v: string) => void;

@@ -1,5 +1,3 @@
-"use client";
-
 export function StreamingText(props: { text: string; streaming: boolean }) {
   return (
     <span className={props.streaming ? "animate-pulse text-neutral-700" : "text-neutral-900"}>

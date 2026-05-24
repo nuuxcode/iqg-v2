@@ -1,5 +1,3 @@
-"use client";
-
 export function ErrorBanner(props: {
   kind: "invalid" | "rate-limit" | "llm-fail" | "network";
   message: string;

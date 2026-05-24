@@ -1,4 +1,3 @@
-"use client";
 import { useEffect, useState } from "react";
 import { loadHistory, clearHistory } from "@/lib/storage";
 import type { QuestionSet } from "@/lib/types";
