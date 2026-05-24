@@ -62,20 +62,30 @@ export async function POST(req: Request) {
     }
   }
 
-  const result = generateWithFallback({
-    prompt: buildMainPrompt({
-      role,
-      type: body.type,
-      difficulty: body.difficulty,
-      exclude: body.exclude,
-    }),
-    forceBackup: body.forceBackup,
-  });
-
-  const streamRes = result.toTextStreamResponse();
-  const headers = new Headers(streamRes.headers);
-  headers.set("Set-Cookie", setCookie);
-  headers.set("X-RateLimit-Remaining", String(rl.remaining));
-  headers.set("X-RateLimit-Reset", String(rl.resetAt));
-  return new Response(streamRes.body, { status: streamRes.status, headers });
+  try {
+    const result = await generateWithFallback({
+      prompt: buildMainPrompt({
+        role,
+        type: body.type,
+        difficulty: body.difficulty,
+        exclude: body.exclude,
+      }),
+      forceBackup: body.forceBackup,
+    });
+    return Response.json(
+      { questions: result.questions },
+      {
+        headers: {
+          "Set-Cookie": setCookie,
+          "X-RateLimit-Remaining": String(rl.remaining),
+          "X-RateLimit-Reset": String(rl.resetAt),
+        },
+      },
+    );
+  } catch (e) {
+    return Response.json(
+      { error: `Generation failed: ${(e as Error).message}` },
+      { status: 502, headers: { "Set-Cookie": setCookie } },
+    );
+  }
 }

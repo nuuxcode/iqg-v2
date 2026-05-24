@@ -1,10 +1,10 @@
-import { generateText, streamObject } from "ai";
+import { generateText, generateObject } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-
-const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY });
 import { z } from "zod";
 import { buildValidatorPrompt } from "./prompts";
 import type { ValidatorResult } from "./types";
+
+const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export const QuestionsSchema = z.object({
   questions: z.array(z.string()).length(3),
@@ -24,29 +24,35 @@ export async function validate(input: string): Promise<ValidatorResult> {
     }
     return parsed;
   } catch (e) {
-    console.error("[validator]", (e as Error).message, (e as Error).stack?.slice(0, 500));
+    console.error("[validator]", (e as Error).message);
     return { valid: false, reason: `validator error: ${(e as Error).message}` };
   }
 }
 
-export function generateWithFallback(args: { prompt: string; forceBackup?: boolean }) {
+export async function generateWithFallback(args: {
+  prompt: string;
+  forceBackup?: boolean;
+}): Promise<{ questions: string[] }> {
   const mainModel = args.forceBackup
     ? process.env.GEMINI_MODEL_BACKUP!
     : process.env.GEMINI_MODEL_MAIN!;
   const backupModel = process.env.GEMINI_MODEL_BACKUP!;
 
-  const tryModel = (modelId: string) =>
-    streamObject({
+  const tryModel = async (modelId: string) => {
+    const res = await generateObject({
       model: google(modelId),
       schema: QuestionsSchema,
       prompt: args.prompt,
       temperature: 0.7,
     });
+    return res.object;
+  };
 
   try {
-    return tryModel(mainModel);
+    return await tryModel(mainModel);
   } catch (e) {
+    console.error("[main-llm]", (e as Error).message);
     if (mainModel === backupModel) throw e;
-    return tryModel(backupModel);
+    return await tryModel(backupModel);
   }
 }

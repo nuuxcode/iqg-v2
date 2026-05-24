@@ -24,7 +24,6 @@ export default function Page() {
   const [type, setType] = useState<QuestionType>("behavioral");
   const [difficulty, setDifficulty] = useState<Difficulty>("medium");
   const [questions, setQuestions] = useState<string[]>([]);
-  const [streaming, setStreaming] = useState(false);
   const [loading, setLoading] = useState(false);
   const [validated, setValidated] = useState(false);
   const [error, setError] = useState<ErrorState | null>(null);
@@ -89,66 +88,38 @@ export default function Page() {
           return;
         }
 
-        const ct = res.headers.get("content-type") ?? "";
-        if (ct.includes("application/json")) {
-          const body = await res.json();
-          if (body.valid === false) {
-            setError({
-              kind: "invalid",
-              message: body.reason ?? "That doesn't look like a job role.",
-              examples: body.examples ?? [],
-            });
-            return;
-          }
-          if (!res.ok) {
-            setError({ kind: "llm-fail", message: body.error ?? "Generation failed." });
-            return;
-          }
+        const body = await res.json();
+
+        if (body.valid === false) {
+          setError({
+            kind: "invalid",
+            message: body.reason ?? "That doesn't look like a job role.",
+            examples: body.examples ?? [],
+          });
+          return;
+        }
+        if (!res.ok) {
+          setError({ kind: "llm-fail", message: body.error ?? "Generation failed." });
+          return;
         }
 
-        if (!res.body) throw new Error("no body");
         setValidated(true);
-        setStreaming(true);
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          try {
-            const parsed = JSON.parse(buffer);
-            const qs = extractQuestions(parsed);
-            const merged = isMore ? [...questions, ...qs] : qs;
-            setQuestions(merged);
-          } catch {
-            // partial JSON - keep accumulating
-          }
-        }
-
-        try {
-          const final = JSON.parse(buffer);
-          const finalQs = extractQuestions(final);
-          const merged = isMore ? [...questions, ...finalQs] : finalQs;
-          setQuestions(merged);
-          if (merged.length === 3 || merged.length === 6) {
-            saveQuestionSet({
-              role,
-              type,
-              difficulty,
-              questions: merged,
-              generatedAt: Date.now(),
-            });
-          }
-        } catch {
-          setError({ kind: "llm-fail", message: "Couldn't parse the response." });
+        const newQs = extractQuestions(body);
+        const merged = isMore ? [...questions, ...newQs] : newQs;
+        setQuestions(merged);
+        if (merged.length === 3 || merged.length === 6) {
+          saveQuestionSet({
+            role,
+            type,
+            difficulty,
+            questions: merged,
+            generatedAt: Date.now(),
+          });
         }
       } catch {
         setError({ kind: "network", message: "Network error. Try again." });
       } finally {
         setLoading(false);
-        setStreaming(false);
       }
     },
     [role, type, difficulty, validated, questions, excludeForCombo],
@@ -218,12 +189,7 @@ export default function Page() {
       {questions.length > 0 && (
         <div className="flex flex-col gap-3">
           {questions.map((q, i) => (
-            <QuestionCard
-              key={i}
-              index={i + 1}
-              text={q}
-              streaming={streaming && i === questions.length - 1}
-            />
+            <QuestionCard key={i} index={i + 1} text={q} />
           ))}
         </div>
       )}
