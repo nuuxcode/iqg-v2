@@ -120,7 +120,7 @@ export default function Page() {
         const newQs = extractQuestions(body);
         const merged = isMore ? [...questions, ...newQs] : newQs;
         setQuestions(merged);
-        if (merged.length === 3 || merged.length === 6) {
+        if (merged.length > 0) {
           saveQuestionSet({
             role: trimmedRole,
             type,

@@ -34,4 +34,24 @@ describe("storage", () => {
     clearHistory();
     expect(loadHistory()).toHaveLength(0);
   });
+
+  test("save merges into top entry when role+type+difficulty match (3 more flow)", () => {
+    saveQuestionSet({ role: "Software Engineer", type: "behavioral", difficulty: "medium", questions: ["a","b","c"], generatedAt: 1 });
+    saveQuestionSet({ role: "Software Engineer", type: "behavioral", difficulty: "medium", questions: ["a","b","c","d","e","f"], generatedAt: 2 });
+    const h = loadHistory();
+    expect(h).toHaveLength(1);
+    expect(h[0].questions).toHaveLength(6);
+  });
+
+  test("save creates new entry when role differs", () => {
+    saveQuestionSet({ role: "Software Engineer", type: "behavioral", difficulty: "medium", questions: ["a","b","c"], generatedAt: 1 });
+    saveQuestionSet({ role: "Product Manager", type: "behavioral", difficulty: "medium", questions: ["x","y","z"], generatedAt: 2 });
+    expect(loadHistory()).toHaveLength(2);
+  });
+
+  test("save creates new entry when difficulty differs even for same role", () => {
+    saveQuestionSet({ role: "Software Engineer", type: "behavioral", difficulty: "medium", questions: ["a","b","c"], generatedAt: 1 });
+    saveQuestionSet({ role: "Software Engineer", type: "behavioral", difficulty: "hard", questions: ["x","y","z"], generatedAt: 2 });
+    expect(loadHistory()).toHaveLength(2);
+  });
 });
