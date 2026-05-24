@@ -9,7 +9,7 @@ vi.mock("ai", () => ({
 }));
 
 vi.mock("@ai-sdk/google", () => ({
-  google: (m: string) => ({ modelId: m }),
+  createGoogleGenerativeAI: () => (m: string) => ({ modelId: m }),
 }));
 
 const { validate, generateWithFallback } = await import("@/lib/llm");
