@@ -14,7 +14,7 @@ export function JobInput(props: {
         autoFocus
         autoComplete="off"
         maxLength={100}
-        placeholder="e.g. Software Engineer, Product Manager…"
+        placeholder="e.g. Customer Success Manager"
         value={props.value}
         disabled={props.disabled}
         onChange={(e) => props.onChange(e.target.value)}
