@@ -14,7 +14,7 @@ export function GenerateButton(props: {
       {props.loading ? (
         <>
           <Spinner />
-          <span>Thinking…</span>
+          <span>Generating your questions…</span>
         </>
       ) : (
         <span>{props.label ?? "Generate 3 questions"}</span>

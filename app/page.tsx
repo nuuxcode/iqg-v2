@@ -12,6 +12,8 @@ import { extractQuestions } from "@/lib/stream-parser";
 import type { QuestionType, Difficulty, QuestionSet } from "@/lib/types";
 
 const MAX_PER_COMBO = 15;
+const MIN_ROLE_LEN = 3;
+const QUICK_PICKS = ["Software Engineer", "Product Manager", "UX Designer"] as const;
 
 type ErrorState =
   | { kind: "invalid"; message: string; examples: readonly string[] }
@@ -60,8 +62,13 @@ export default function Page() {
   const totalForCombo = excludeForCombo.length + questions.length;
   const moreDisabled = totalForCombo >= MAX_PER_COMBO;
 
+  const trimmedRole = role.trim();
+  const tooShort = trimmedRole.length > 0 && trimmedRole.length < MIN_ROLE_LEN;
+  const canSubmit = trimmedRole.length >= MIN_ROLE_LEN;
+
   const submit = useCallback(
     async (mode: "fresh" | "more") => {
+      if (!canSubmit) return;
       setError(null);
       setLoading(true);
       const isMore = mode === "more";
@@ -75,7 +82,7 @@ export default function Page() {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            role,
+            role: trimmedRole,
             type,
             difficulty,
             exclude: currentExclude,
@@ -84,7 +91,10 @@ export default function Page() {
         });
 
         if (res.status === 429) {
-          setError({ kind: "rate-limit", message: "You've used your daily quota. Comes back tomorrow." });
+          setError({
+            kind: "rate-limit",
+            message: "You've used your daily question quota. Come back tomorrow — or clear cookies if you really must.",
+          });
           return;
         }
 
@@ -93,13 +103,16 @@ export default function Page() {
         if (body.valid === false) {
           setError({
             kind: "invalid",
-            message: body.reason ?? "That doesn't look like a job role.",
+            message: "That doesn't look like a job title yet. Tap one below or type a real role:",
             examples: body.examples ?? [],
           });
           return;
         }
         if (!res.ok) {
-          setError({ kind: "llm-fail", message: body.error ?? "Generation failed." });
+          setError({
+            kind: "llm-fail",
+            message: "Couldn't generate questions right now. Wait a few seconds and try again.",
+          });
           return;
         }
 
@@ -109,7 +122,7 @@ export default function Page() {
         setQuestions(merged);
         if (merged.length === 3 || merged.length === 6) {
           saveQuestionSet({
-            role,
+            role: trimmedRole,
             type,
             difficulty,
             questions: merged,
@@ -117,12 +130,15 @@ export default function Page() {
           });
         }
       } catch {
-        setError({ kind: "network", message: "Network error. Try again." });
+        setError({
+          kind: "network",
+          message: "Couldn't reach the server. Check your connection and retry.",
+        });
       } finally {
         setLoading(false);
       }
     },
-    [role, type, difficulty, validated, questions, excludeForCombo],
+    [canSubmit, trimmedRole, type, difficulty, validated, questions, excludeForCombo],
   );
 
   const restoreSet = (s: QuestionSet) => {
@@ -131,6 +147,11 @@ export default function Page() {
     setDifficulty(s.difficulty);
     setQuestions(s.questions);
     setValidated(true);
+  };
+
+  const useExample = (ex: string) => {
+    setRole(ex);
+    setError(null);
   };
 
   return (
@@ -142,10 +163,32 @@ export default function Page() {
         >
           ☰ History
         </button>
-        <h1 className="text-base font-semibold">IQG</h1>
+        <h1 className="text-base font-semibold">Interview Questions</h1>
       </header>
 
-      <JobInput value={role} onChange={setRole} disabled={loading} />
+      <div className="flex flex-col gap-1">
+        <JobInput value={role} onChange={setRole} disabled={loading} />
+        {tooShort && (
+          <p className="text-xs text-neutral-500">
+            Type at least {MIN_ROLE_LEN} characters.
+          </p>
+        )}
+        {!role && questions.length === 0 && (
+          <div className="mt-1 flex flex-wrap gap-2">
+            <span className="text-xs text-neutral-500">Try:</span>
+            {QUICK_PICKS.map((ex) => (
+              <button
+                key={ex}
+                type="button"
+                onClick={() => useExample(ex)}
+                className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-xs font-medium text-neutral-700 hover:border-brand-500 hover:text-brand-600"
+              >
+                {ex}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       <SelectorGroup
         label="Type"
@@ -172,7 +215,7 @@ export default function Page() {
       />
 
       <GenerateButton
-        disabled={role.trim().length === 0}
+        disabled={!canSubmit}
         loading={loading}
         onClick={() => submit("fresh")}
       />
@@ -182,7 +225,12 @@ export default function Page() {
           kind={error.kind}
           message={error.message}
           examples={error.kind === "invalid" ? error.examples : undefined}
-          onRetry={error.kind !== "rate-limit" ? () => submit("fresh") : undefined}
+          onUseExample={error.kind === "invalid" ? useExample : undefined}
+          onRetry={
+            error.kind === "llm-fail" || error.kind === "network"
+              ? () => submit("fresh")
+              : undefined
+          }
         />
       )}
 
