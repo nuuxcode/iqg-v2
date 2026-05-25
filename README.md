@@ -27,9 +27,10 @@ A mobile-first web app: type a job title, pick question type and difficulty, get
 - **History merge logic** — clicking "3 more" updates the same history entry instead of duplicating it; changing role/type/difficulty starts a fresh entry
 
 ### LLM strategy
-- **Two-stage cost pattern** — cheap validator (Gemini 2.5 Flash Lite) decides if the input is a real role before the expensive generator (Gemini 2.5 Pro) is called. ~80% cost saving on bad inputs.
-- **Backup model** — if the main model errors or times out, automatically retries with Gemini 2.5 Flash. User never sees the failure unless both fail.
-- **Dev/Prod model swap** via env var — local dev uses 2.5 (higher free-tier limits), production can swap to 3.1 with no code change
+- **Two-stage cost pattern** — Gemini Flash Lite validates the input first (real job title or garbage?), then Gemini Flash generates the questions. Bad inputs get rejected without paying for the main call.
+- **Main model = Flash, deliberately not Pro** — interview-question generation doesn't need frontier reasoning. It needs role knowledge, consistent structure, and speed. Flash gives all three at ~10× lower cost and ~3× faster than Pro. The real quality lever in this product is the prompt + exclude list, not the model size.
+- **Backup model** — if the main fails, retries with Gemini Flash Lite. Same family, no second vendor, no second SDK.
+- **Model names via env var** — swap any model with a dashboard change, no code edit
 - **Skip re-validation on retry** — validated inputs are cached client-side; retries don't pay for a second validator call
 - **Temperature tuned per call** — `0` for the deterministic validator, `0.7` for the creative generator
 
@@ -136,8 +137,7 @@ pnpm typecheck      # tsc --noEmit
 | `RATELIMIT_SECRET` | 32-byte hex string for HMAC cookie | yes |
 | `DAILY_LIMIT` | requests per day per user (default 10) | no |
 
-Dev defaults: `gemini-2.5-flash-lite` / `gemini-2.5-pro` / `gemini-2.5-flash`.
-Production swap: `gemini-3.1-flash-lite` / `gemini-3.1-pro` / `gemini-3.1-flash`.
+Current values: validator `gemini-2.5-flash-lite` / main `gemini-2.5-flash` / backup `gemini-2.5-flash-lite`. Single-family stack for simplicity. Swap to `gemini-3.x` in the Vercel dashboard if you want preview-grade quality.
 
 ---
 
