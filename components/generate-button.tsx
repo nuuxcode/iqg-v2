@@ -3,6 +3,7 @@ export function GenerateButton(props: {
   loading: boolean;
   onClick: () => void;
   label?: string;
+  loadingLabel?: string;
 }) {
   return (
     <button
@@ -14,7 +15,7 @@ export function GenerateButton(props: {
       {props.loading ? (
         <>
           <Spinner />
-          <span>Generating your questions…</span>
+          <span>{props.loadingLabel ?? "Generating your questions…"}</span>
         </>
       ) : (
         <span>{props.label ?? "Generate 3 questions"}</span>

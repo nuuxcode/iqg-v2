@@ -293,9 +293,17 @@ export default function Page() {
         />
 
         <GenerateButton
-          disabled={!canSubmit || isLoading}
-          loading={loadingMode === "fresh"}
-          onClick={() => submit("fresh")}
+          disabled={!canSubmit || isLoading || (questions.length > 0 && moreDisabled)}
+          loading={questions.length > 0 ? loadingMode === "more" : loadingMode === "fresh"}
+          onClick={() => submit(questions.length > 0 ? "more" : "fresh")}
+          label={
+            questions.length === 0
+              ? "Generate 3 questions"
+              : moreDisabled
+              ? "You've explored this combo. Try a different type or difficulty."
+              : "Give me 3 more"
+          }
+          loadingLabel={questions.length > 0 ? "Generating 3 more…" : "Generating your questions…"}
         />
 
         <div ref={sentinelRef} aria-hidden />
