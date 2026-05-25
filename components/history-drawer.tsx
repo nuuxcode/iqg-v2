@@ -1,7 +1,42 @@
+/**
+ * @file components/history-drawer.tsx
+ * @description Slide-in sidebar that shows the user's past question sets
+ * (read from localStorage). Tap an entry to restore it into the main view.
+ * Also has a "Clear all" button at the bottom.
+ * @module HistoryDrawer
+ * @author Mounssif BOUHLAOUI
+ * @created 2026-05-25
+ *
+ * @story
+ * The drawer owns its own data — it reads history fresh from localStorage
+ * each time it opens. That means changes made by the parent (e.g. saving
+ * a new question set) are visible the next time the user opens the drawer
+ * without needing prop drilling.
+ *
+ * The "Clear all" footer only renders when there are items, to avoid an
+ * empty bare button on the initial empty state. The empty state shows a
+ * friendly "Nothing yet" message instead.
+ *
+ * The backdrop is `bg-black/40` with click-to-close — standard mobile
+ * drawer behavior. The drawer itself is `w-[85vw] max-w-sm` which fits
+ * comfortably on phones without covering the full screen.
+ */
+
 import { useEffect, useState } from "react";
 import { loadHistory, clearHistory } from "@/lib/storage";
 import type { QuestionSet } from "@/lib/types";
 
+/**
+ * Sliding history drawer. Controlled by the parent via `open` / `onClose`.
+ *
+ * @param {object} props
+ * @param {boolean} props.open - Whether the drawer is visible.
+ * @param {() => void} props.onClose - Called when the user taps the
+ *   backdrop or the "Close" button.
+ * @param {(set: QuestionSet) => void} props.onSelect - Called when the
+ *   user taps a past entry. Parent should restore the questions to view.
+ * @returns {JSX.Element | null} The drawer markup, or null when closed.
+ */
 export function HistoryDrawer(props: {
   open: boolean;
   onClose: () => void;
@@ -9,6 +44,8 @@ export function HistoryDrawer(props: {
 }) {
   const [items, setItems] = useState<QuestionSet[]>([]);
 
+  // Re-load history every time the drawer opens — picks up any new entries
+  // the parent saved while we were closed.
   useEffect(() => {
     if (props.open) setItems(loadHistory());
   }, [props.open]);
@@ -17,6 +54,7 @@ export function HistoryDrawer(props: {
 
   return (
     <div className="fixed inset-0 z-40 flex">
+      {/* Backdrop: tap-to-close. */}
       <div
         className="absolute inset-0 bg-black/40"
         onClick={props.onClose}

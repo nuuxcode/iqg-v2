@@ -1,3 +1,43 @@
+/**
+ * @file app/page.tsx
+ * @description The ONLY page in the app. Orchestrates every interaction:
+ * input + selectors + Generate button + question rendering + History drawer
+ * + sticky scroll banner + error display. Marked `"use client"` because
+ * it owns React state, event handlers, and `IntersectionObserver`.
+ * @module Page
+ * @author Mounssif BOUHLAOUI
+ * @created 2026-05-25
+ *
+ * @story
+ * State graph (each piece exists for a specific reason):
+ *
+ *   role              - the user's current input
+ *   type, difficulty  - the selectors (persisted to localStorage so they
+ *                       survive page reloads)
+ *   questions         - the generated questions (cleared on input change)
+ *   loadingMode       - "fresh" | "more" | null. Three-state because the top
+ *                       button and the bottom button can each show their own
+ *                       spinner, depending on which click triggered the load
+ *   validated         - flag to skip re-validation on retry calls (saves a
+ *                       Gemini call when the user clicks "3 more")
+ *   error             - discriminated union, each variant carries its own
+ *                       fields (examples for "invalid", retry for "llm-fail")
+ *   historyOpen       - drawer toggle
+ *   showStickyBar     - true when the user has scrolled past the form;
+ *                       driven by IntersectionObserver on a sentinel div
+ *
+ * Effects:
+ *   - On mount: create userId UUID, restore last-used type + difficulty
+ *   - On type/difficulty change: persist to localStorage
+ *   - On role/type/difficulty change: reset session (clear questions, error,
+ *     validated flag) — this is what makes "input changes resets the button
+ *     back to Generate 3 questions"
+ *   - On mount: wire IntersectionObserver to the sentinel for the sticky bar
+ *
+ * The main `submit()` callback is the only orchestration logic. Everything
+ * else is event handlers and rendering.
+ */
+
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { JobInput } from "@/components/job-input";
@@ -11,14 +51,23 @@ import { saveQuestionSet, getQuestionsForCombo } from "@/lib/storage";
 import { extractQuestions } from "@/lib/stream-parser";
 import type { QuestionType, Difficulty, QuestionSet } from "@/lib/types";
 
+/** Hard cap on questions for one role+type+difficulty combo. After this,
+ * LLM quality drops as the exclude list grows; we disable "3 more" with
+ * a hint to try a different combo. */
 const MAX_PER_COMBO = 15;
+
+/** Minimum role-input length before the Generate button enables. */
 const MIN_ROLE_LEN = 3;
+
+/** Quick-pick chips shown under the input on the empty state.
+ *  Customer Success Manager is FIRST because it's the brief's primary example. */
 const QUICK_PICKS = [
   "Customer Success Manager",
   "Software Engineer",
   "Product Manager",
 ] as const;
 
+/** Human-readable labels for the sticky bar (which shows "Behavioral · Medium" etc.). */
 const TYPE_LABEL: Record<QuestionType, string> = {
   behavioral: "Behavioral",
   technical: "Technical",
@@ -30,13 +79,21 @@ const DIFF_LABEL: Record<Difficulty, string> = {
   hard: "Hard",
 };
 
+/** Discriminated union of error states. Each variant carries exactly the
+ *  fields its display needs — no optional fields, no nullable bag. */
 type ErrorState =
   | { kind: "invalid"; message: string; examples: readonly string[] }
   | { kind: "rate-limit"; message: string }
   | { kind: "llm-fail"; message: string }
   | { kind: "network"; message: string };
 
+/**
+ * The main app page. Renders the entire single-page UI.
+ *
+ * @returns {JSX.Element}
+ */
 export default function Page() {
+  // === State ===
   const [role, setRole] = useState("");
   const [type, setType] = useState<QuestionType>("behavioral");
   const [difficulty, setDifficulty] = useState<Difficulty>("medium");
@@ -50,6 +107,9 @@ export default function Page() {
 
   const isLoading = loadingMode !== null;
 
+  // === Mount effects ===
+
+  /** Create UUID identity + restore persisted selectors on first render. */
   useEffect(() => {
     if (typeof window === "undefined") return;
     getOrCreateUserId();
@@ -59,20 +119,27 @@ export default function Page() {
     if (d) setDifficulty(d);
   }, []);
 
+  /** Persist Type selector across visits. */
   useEffect(() => {
     if (typeof window !== "undefined") localStorage.setItem("iqg_lastType", type);
   }, [type]);
 
+  /** Persist Difficulty selector across visits. */
   useEffect(() => {
     if (typeof window !== "undefined") localStorage.setItem("iqg_lastDiff", difficulty);
   }, [difficulty]);
 
+  /** Reset the session whenever the user changes role / type / difficulty.
+   *  This is how the top button "snaps back" from "Give me 3 more" to
+   *  "Generate 3 questions" when the user changes the input. */
   useEffect(() => {
     setValidated(false);
     setQuestions([]);
     setError(null);
   }, [role, type, difficulty]);
 
+  /** Sticky-bar trigger. The sentinel div sits right below the Generate
+   *  button; when it scrolls above the viewport, the bar appears. */
   useEffect(() => {
     if (!sentinelRef.current) return;
     const obs = new IntersectionObserver(
@@ -85,6 +152,10 @@ export default function Page() {
     return () => obs.disconnect();
   }, []);
 
+  // === Derived state ===
+
+  /** All previously-asked questions for this combo (across all history
+   *  entries, deduped). Sent to the LLM as the exclude block. */
   const excludeForCombo = useMemo(
     () => (role ? getQuestionsForCombo(role, type, difficulty) : []),
     [role, type, difficulty],
@@ -97,6 +168,15 @@ export default function Page() {
   const tooShort = trimmedRole.length > 0 && trimmedRole.length < MIN_ROLE_LEN;
   const canSubmit = trimmedRole.length >= MIN_ROLE_LEN;
 
+  // === Actions ===
+
+  /**
+   * The only function that talks to the API. Used by both the top button
+   * (mode="fresh") and the "3 more" button (mode="more").
+   *
+   * @param {"fresh" | "more"} mode - "fresh" clears questions and re-validates.
+   *   "more" appends to the existing list and sends the exclude block.
+   */
   const submit = useCallback(
     async (mode: "fresh" | "more") => {
       if (!canSubmit || isLoading) return;
@@ -121,6 +201,7 @@ export default function Page() {
           }),
         });
 
+        // 429 = rate-limited. No retry option — wait until tomorrow.
         if (res.status === 429) {
           setError({
             kind: "rate-limit",
@@ -131,6 +212,7 @@ export default function Page() {
 
         const body = await res.json();
 
+        // Validator rejected — surface examples for the user to tap.
         if (body.valid === false) {
           setError({
             kind: "invalid",
@@ -139,6 +221,8 @@ export default function Page() {
           });
           return;
         }
+
+        // Any other non-OK response = LLM-side failure.
         if (!res.ok) {
           setError({
             kind: "llm-fail",
@@ -147,6 +231,7 @@ export default function Page() {
           return;
         }
 
+        // Success — render questions and persist to history.
         setValidated(true);
         const newQs = extractQuestions(body);
         const merged = isMore ? [...questions, ...newQs] : newQs;
@@ -161,6 +246,7 @@ export default function Page() {
           });
         }
       } catch {
+        // Network / parsing / unexpected error.
         setError({
           kind: "network",
           message: "Couldn't reach the server. Check your connection and retry.",
@@ -172,6 +258,13 @@ export default function Page() {
     [canSubmit, isLoading, trimmedRole, type, difficulty, validated, questions, excludeForCombo],
   );
 
+  /**
+   * Restore a past session from the History drawer. Sets all the form
+   * fields + questions to match, and flags `validated=true` so the next
+   * "3 more" click doesn't re-pay for validation.
+   *
+   * @param {QuestionSet} s - History entry the user tapped.
+   */
   const restoreSet = (s: QuestionSet) => {
     setRole(s.role);
     setType(s.type);
@@ -180,17 +273,26 @@ export default function Page() {
     setValidated(true);
   };
 
+  /**
+   * Fill the input with a quick-pick or example value. Also clears any
+   * existing error so the user sees a clean form.
+   *
+   * @param {string} ex - The example string to use as the new input value.
+   */
   const useExample = (ex: string) => {
     setRole(ex);
     setError(null);
   };
 
+  /** Smooth-scroll back to the top. Triggered by tapping the role in the sticky bar. */
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   return (
     <>
+      {/* Sticky scroll banner: appears once the user scrolls past the form.
+          Lets them regenerate without scrolling back up. */}
       {showStickyBar && canSubmit && (
         <div className="fixed inset-x-0 top-0 z-30 border-b border-neutral-200 bg-white/85 backdrop-blur-md">
           <div className="mx-auto flex max-w-xl items-center gap-2 px-3 py-2">
@@ -234,6 +336,7 @@ export default function Page() {
       )}
 
       <main className="mx-auto flex max-w-xl flex-col gap-5 px-4 pb-32 pt-6">
+        {/* Header with History button (left) + app title (right) */}
         <header className="flex items-center justify-between">
           <button
             onClick={() => setHistoryOpen(true)}
@@ -244,6 +347,7 @@ export default function Page() {
           <h1 className="text-base font-semibold">Interview Questions</h1>
         </header>
 
+        {/* Input + min-length hint + empty-state quick-picks */}
         <div className="flex flex-col gap-1">
           <JobInput value={role} onChange={setRole} disabled={isLoading} />
           {tooShort && (
@@ -268,6 +372,7 @@ export default function Page() {
           )}
         </div>
 
+        {/* Type + Difficulty selectors */}
         <SelectorGroup
           label="Type"
           value={type}
@@ -292,6 +397,7 @@ export default function Page() {
           ]}
         />
 
+        {/* Main Generate button — morphs to "Give me 3 more" after first generation */}
         <GenerateButton
           disabled={!canSubmit || isLoading || (questions.length > 0 && moreDisabled)}
           loading={questions.length > 0 ? loadingMode === "more" : loadingMode === "fresh"}
@@ -306,8 +412,10 @@ export default function Page() {
           loadingLabel={questions.length > 0 ? "Generating 3 more…" : "Generating your questions…"}
         />
 
+        {/* Sentinel for the sticky-bar IntersectionObserver. Invisible. */}
         <div ref={sentinelRef} aria-hidden />
 
+        {/* Error banner — kind-aware behavior */}
         {error && (
           <ErrorBanner
             kind={error.kind}
@@ -322,6 +430,7 @@ export default function Page() {
           />
         )}
 
+        {/* Generated questions */}
         {questions.length > 0 && (
           <div className="flex flex-col gap-3">
             {questions.map((q, i) => (
@@ -330,6 +439,7 @@ export default function Page() {
           </div>
         )}
 
+        {/* Bottom "Give me 3 more" button — in context with the questions */}
         {questions.length > 0 && (
           <button
             onClick={() => submit("more")}
@@ -349,6 +459,7 @@ export default function Page() {
           </button>
         )}
 
+        {/* History drawer (slides in from left when opened) */}
         <HistoryDrawer
           open={historyOpen}
           onClose={() => setHistoryOpen(false)}
@@ -359,6 +470,12 @@ export default function Page() {
   );
 }
 
+/**
+ * Small 16×16 spinner used inside the sticky-bar button and the
+ * bottom "Give me 3 more" button. Pure SVG, no icon-lib dependency.
+ *
+ * @returns {JSX.Element}
+ */
 function MiniSpinner() {
   return (
     <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
