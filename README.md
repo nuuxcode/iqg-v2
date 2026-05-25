@@ -1,31 +1,103 @@
 # Interview Question Generator (iqg-v2)
 
-A mobile-first web app: enter any job title, pick a question type and difficulty, get 3 thoughtful interview questions tailored to that role. Tap "Give me 3 more" to extend without repeats.
+A mobile-first web app: type a job title, pick question type and difficulty, get 3 thoughtful, role-specific interview questions from an LLM. Tap "Give me 3 more" to extend without repeats.
 
-## How it works
+**Live:** https://iqg-v2.vercel.app
+**Repo:** https://github.com/nuuxcode/iqg-v2
+
+---
+
+## Features
+
+### Core flow
+- **Job title input** with a 100-char cap and a 3-char minimum (real-time hint)
+- **Quick-pick chips** on the empty state — Customer Success Manager, Software Engineer, Product Manager — tap to populate the input
+- **Type selector** — Behavioral / Technical / Situational
+- **Difficulty selector** — Easy / Medium / Hard
+- **Last-used type and difficulty** persist across visits (localStorage)
+- **Loading state** inside the button itself — the button IS the spinner
+- **3 questions rendered as cards**, mobile-readable typography
+
+### Smart UX
+- **Generate button morphs** to "Give me 3 more" after first generation; resets when input changes
+- **"Give me 3 more"** sends previously-generated questions to the LLM as an exclude list — no repeats or paraphrases
+- **15-question cap per `role + type + difficulty` combo** — button disables with a hint to try a different combo
+- **Sticky scroll banner** appears at the top once the user scrolls past the form — tap role to scroll back, or tap "↻ 3 more" to regenerate without scrolling
+- **History drawer** — sliding sidebar with past sessions; tap to restore a past question set
+- **History merge logic** — clicking "3 more" updates the same history entry instead of duplicating it; changing role/type/difficulty starts a fresh entry
+
+### LLM strategy
+- **Two-stage cost pattern** — cheap validator (Gemini 2.5 Flash Lite) decides if the input is a real role before the expensive generator (Gemini 2.5 Pro) is called. ~80% cost saving on bad inputs.
+- **Backup model** — if the main model errors or times out, automatically retries with Gemini 2.5 Flash. User never sees the failure unless both fail.
+- **Dev/Prod model swap** via env var — local dev uses 2.5 (higher free-tier limits), production can swap to 3.1 with no code change
+- **Skip re-validation on retry** — validated inputs are cached client-side; retries don't pay for a second validator call
+- **Temperature tuned per call** — `0` for the deterministic validator, `0.7` for the creative generator
+
+### Errors that guide instead of dead-end
+- **Invalid input** → friendly banner with **clickable example chips** that fill the input on tap (not a useless "try again")
+- **Rate-limit reached** → tells the user when they can come back
+- **LLM failed** → simple retry, no jargon
+- **Network error** → "check your connection and retry"
+- **Mid-failure recovery** — backup model attempt is invisible to the user
+
+### Safety & anti-abuse
+- **HMAC-signed daily rate limit** — HttpOnly cookie, 10 generations per browser per day. No third-party service required.
+- **Vercel $5 spend cap** — hard ceiling on cost if rate limiting fails or someone clears cookies to bypass
+- **Input sanitization** — length cap, newline stripping, rejection of obvious prompt-injection patterns
+- **Validator LLM** doubles as a second layer of injection defense
+- **Output filter library** for prompt-leak detection (built and tested; route integration deferred to v1.1 — see Tradeoffs)
+- **Zod schema** validates every API request body before any logic runs
+- **All secrets server-only** — no `NEXT_PUBLIC_` API keys
+
+### Mobile-first design
+- **Built for 375px-wide phones first**, then enhanced for tablet and desktop
+- **44px minimum tap targets** on every button per Apple HIG
+- **`min-h-dvh`** for the dynamic viewport (no layout jumps on iOS Safari URL bar)
+- **iOS tap-highlight disabled** for a native-app feel
+
+### No-DB architecture
+- **User identity** = client-generated UUID in localStorage (no auth, no fingerprint)
+- **History** = localStorage, capped at 50 entries
+- **Rate limit** = HMAC-signed cookie (no Redis, no Upstash)
+- **Email/feedback** = deferred to v2 (no Resend or SMTP in v1)
+
+---
+
+## How it works (architecture)
 
 ```
-[Browser] -> POST /api/generate -> [Cookie rate-limit (HMAC-signed)]
-                                -> [Gemini Flash Lite (validator)]
-                                   if invalid: return example job titles
-                                -> [Gemini Pro stream]
-                                   on failure: [Gemini Flash backup]
-                                <- streaming JSON {"questions":["q1","q2","q3"]}
+[Browser]
+   POST /api/generate {role, type, difficulty, exclude, validated}
+        |
+        v
+[Next.js API route]
+   1. Zod parse body                  -> 400 on malformed
+   2. Verify HMAC cookie + increment  -> 429 if over daily limit
+   3. Sanitize input                  -> 400 on bad chars / length
+   4. Validator LLM (cheap)           -> 200 with examples if invalid
+   5. Main LLM (Gemini Pro)
+        on failure: Backup LLM
+   6. Return {questions: [q1, q2, q3]}
+        |
+        v
+[Browser]
+   Render question cards
+   Save to localStorage history (merge if same combo as top entry)
 ```
 
-- **No database.** History lives in `localStorage`. User identity is a `localStorage` UUID.
-- **No third-party services beyond Gemini.** Rate limiting is HMAC-signed HttpOnly cookies. Bypassable by clearing cookies, but the Vercel $5 spend cap is the real safety net.
-- **Mobile-first.** Built for 375px-wide phones first, then enhanced for desktop.
-- **Streaming.** Questions appear word-by-word as the LLM generates them.
+---
 
 ## Tech stack
 
-- Next.js 16 App Router
-- TypeScript strict
-- Tailwind v4
-- Vercel AI SDK v6 + `@ai-sdk/google`
-- Zod for request validation
-- Vitest for unit + integration tests
+- **Next.js 16** App Router
+- **TypeScript** strict
+- **Tailwind v4** with `@theme` directive
+- **Vercel AI SDK v6** + `@ai-sdk/google`
+- **Zod** for request validation
+- **Vitest** for unit + integration tests
+- **Vercel** for hosting
+
+---
 
 ## Local development
 
@@ -39,6 +111,8 @@ pnpm dev
 
 Open http://localhost:3000.
 
+---
+
 ## Tests
 
 ```bash
@@ -46,6 +120,10 @@ pnpm test           # unit + integration (mocked Gemini, deterministic, fast)
 pnpm test:smoke     # 7 real-Gemini tests, ~$0.05 per run
 pnpm typecheck      # tsc --noEmit
 ```
+
+60+ tests covering the rate-limit cookie, sanitizer, output filter, prompt builders, LLM wrapper (mocked), API route integration, and React components.
+
+---
 
 ## Environment variables
 
@@ -61,15 +139,19 @@ pnpm typecheck      # tsc --noEmit
 Dev defaults: `gemini-2.5-flash-lite` / `gemini-2.5-pro` / `gemini-2.5-flash`.
 Production swap: `gemini-3.1-flash-lite` / `gemini-3.1-pro` / `gemini-3.1-flash`.
 
+---
+
 ## Tradeoffs (what I'd add for production)
 
-- **Real rate limiting** via Upstash Marketplace install. The current cookie approach is bypassable by clearing cookies; we rely on a Vercel spend cap as the hard ceiling.
-- **Feedback + Report buttons** with Resend email integration (deferred to v2).
+- **Real rate limiting** via Upstash through the Vercel Marketplace — the current HMAC cookie is bypassable by clearing storage. The Vercel $5 spend cap is the hard wall today.
+- **Wire the output filter** (already built in `lib/output-filter.ts`, with tests) into the route — catches prompt-leak patterns in LLM output. One-line integration, deferred to v1.1.
+- **Real streaming UX** — `streamObject` from AI SDK v6 returns 0 bytes in production. The streaming UI primitives (`StreamingText`, `streaming` prop on cards) are in the codebase ready to reconnect when the API stabilizes.
+- **Feedback + Report buttons** with email delivery via Resend (deferred to v2).
 - **Sentry** for production error tracking.
-- **A/B testing** the prompt to optimize question quality across roles.
-- **Cross-device history** via a real DB once auth is added.
+- **A/B testing** the main prompt to measure question quality per role.
+- **Cross-device history** via Neon Postgres once auth is added.
 
-See `docs/build-history/` for the full decision log (entries 001-009).
+---
 
 ## License
 
