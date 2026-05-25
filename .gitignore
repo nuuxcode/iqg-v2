@@ -37,6 +37,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# internal-only local folders
+docs/
+
 # local dev logs (not for public)
 logs/
 
