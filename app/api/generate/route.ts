@@ -117,11 +117,22 @@ export async function POST(req: Request) {
   // STEP 4 — Validator LLM. Skip if the client tells us this input was already
   // validated in a previous call (saves a Gemini call on "3 more" requests).
   if (!body.validated) {
-    const v = await validate(role);
-    if (!v.valid) {
+    try {
+      const v = await validate(role);
+      if (!v.valid) {
+        return Response.json(
+          { valid: false, reason: v.reason, examples: EXAMPLES },
+          { status: 200, headers: { "Set-Cookie": setCookie } },
+        );
+      }
+    } catch (e) {
+      // Validator SERVICE error (network, key revoked, etc.) — distinct from
+      // model deciding the input is invalid. Surface the real message so the
+      // user/dev sees what's actually broken instead of "that's not a job title".
+      console.error("[validator-service]", (e as Error).message);
       return Response.json(
-        { valid: false, reason: v.reason, examples: EXAMPLES },
-        { status: 200, headers: { "Set-Cookie": setCookie } },
+        { error: `Validator service error: ${(e as Error).message}` },
+        { status: 502, headers: { "Set-Cookie": setCookie } },
       );
     }
   }

@@ -56,35 +56,41 @@ export const QuestionsSchema = z.object({
 /**
  * Runs the cheap validator LLM to decide whether the input is a real job role.
  *
- * Catches every error (network, parsing, model errors) and returns a
- * structured `{ valid: false, reason }` so callers never see exceptions.
- * The error message is surfaced in the `reason` so production bugs are
- * self-diagnosing (a deliberate tradeoff for a portfolio demo — in a real
- * product I'd log server-side and return a generic message).
+ * Distinguishes two failure modes:
+ *   - Model legitimately classified input as not-a-role -> returns
+ *     `{ valid: false, reason }`. Caller shows the friendly "tap an example" UI.
+ *   - The validator service itself failed (network, key revoked, malformed
+ *     output, etc.) -> THROWS. Caller maps to HTTP 502 + shows the real
+ *     message in the UI. This is critical: a revoked API key should never
+ *     surface as "that doesn't look like a job title" to the user.
  *
  * @param {string} input - The user's sanitized job-title input.
- * @returns {Promise<ValidatorResult>} `{ valid: true }` if the input is a real
- *   role, otherwise `{ valid: false, reason: "<short string>" }`.
+ * @returns {Promise<ValidatorResult>} `{ valid: true }` or `{ valid: false, reason }`.
+ * @throws {Error} On any infrastructure error (network, auth, parse failure).
+ *   Includes the underlying SDK message so production issues are self-diagnosing.
  */
 export async function validate(input: string): Promise<ValidatorResult> {
+  // Let SDK errors (network, auth, key revoked) bubble up — they are NOT
+  // input-validity signals. Caller distinguishes service vs user error.
+  const res = await generateText({
+    model: google(process.env.GEMINI_MODEL_VALIDATOR!),
+    prompt: buildValidatorPrompt(input),
+    temperature: 0,
+  });
+  // Some Gemini responses wrap JSON in ```json ... ``` markdown fences;
+  // strip them before parsing.
+  const text = res.text.trim().replace(/^```json\s*|\s*```$/g, "");
+  let parsed: ValidatorResult;
   try {
-    const res = await generateText({
-      model: google(process.env.GEMINI_MODEL_VALIDATOR!),
-      prompt: buildValidatorPrompt(input),
-      temperature: 0,
-    });
-    // Some Gemini responses wrap JSON in ```json ... ``` markdown fences;
-    // strip them before parsing.
-    const text = res.text.trim().replace(/^```json\s*|\s*```$/g, "");
-    const parsed = JSON.parse(text) as ValidatorResult;
-    if (typeof parsed.valid !== "boolean") {
-      return { valid: false, reason: "malformed validator response" };
-    }
-    return parsed;
-  } catch (e) {
-    console.error("[validator]", (e as Error).message);
-    return { valid: false, reason: `validator error: ${(e as Error).message}` };
+    parsed = JSON.parse(text) as ValidatorResult;
+  } catch {
+    // Validator returned non-JSON -> service-side bug, not user input issue.
+    throw new Error(`Validator returned non-JSON: ${text.slice(0, 120)}`);
   }
+  if (typeof parsed.valid !== "boolean") {
+    throw new Error("Validator returned non-boolean `valid` field");
+  }
+  return parsed;
 }
 
 /**

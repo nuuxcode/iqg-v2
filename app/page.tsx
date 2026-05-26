@@ -223,10 +223,13 @@ export default function Page() {
         }
 
         // Any other non-OK response = LLM-side failure.
+        // Surface the server's actual error message instead of a generic line
+        // so a revoked key, network issue, or model outage is debuggable from
+        // the UI alone (backend.md: ALWAYS propagate backend error messages).
         if (!res.ok) {
           setError({
             kind: "llm-fail",
-            message: "Couldn't generate questions right now. Wait a few seconds and try again.",
+            message: body.error ?? "Couldn't generate questions right now. Wait a few seconds and try again.",
           });
           return;
         }
