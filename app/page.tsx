@@ -129,10 +129,23 @@ export default function Page() {
     if (typeof window !== "undefined") localStorage.setItem("iqg_lastDiff", difficulty);
   }, [difficulty]);
 
+  /** When set true, the next [role/type/difficulty] effect run is treated as
+   *  a programmatic restore (from history) and skips the reset. Without this,
+   *  restoring a history entry would immediately wipe the questions it just
+   *  set, because changing role/type/difficulty triggers the reset effect. */
+  const isRestoring = useRef(false);
+
   /** Reset the session whenever the user changes role / type / difficulty.
    *  This is how the top button "snaps back" from "Give me 3 more" to
-   *  "Generate 3 questions" when the user changes the input. */
+   *  "Generate 3 questions" when the user changes the input.
+   *
+   *  Skipped when isRestoring is set, so history-tap doesn't wipe the
+   *  restored questions. */
   useEffect(() => {
+    if (isRestoring.current) {
+      isRestoring.current = false;
+      return;
+    }
     setValidated(false);
     setQuestions([]);
     setError(null);
@@ -269,11 +282,16 @@ export default function Page() {
    * @param {QuestionSet} s - History entry the user tapped.
    */
   const restoreSet = (s: QuestionSet) => {
+    // Flag so the reset effect (triggered by role/type/difficulty change)
+    // skips its wipe — otherwise the questions we set below get cleared
+    // before they ever render.
+    isRestoring.current = true;
     setRole(s.role);
     setType(s.type);
     setDifficulty(s.difficulty);
     setQuestions(s.questions);
     setValidated(true);
+    setError(null);
   };
 
   /**
